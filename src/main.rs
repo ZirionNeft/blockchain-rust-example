@@ -1,7 +1,7 @@
 use actix_web::web::{Data, Json};
 use actix_web::{error, get, post, App, HttpServer, Result};
 use blockchain::Blockchain;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use serde_json::{json, Value};
 
 use std::io;
@@ -12,8 +12,6 @@ mod utils;
 
 use blockchain::block::Block;
 use utils::get_current_time;
-
-const TARGET_BITS: u8 = 24;
 
 struct AppState {
     blockchain: Mutex<Blockchain>,
@@ -67,13 +65,13 @@ async fn add_chain_block(
 
 #[actix_web::main]
 async fn main() -> io::Result<()> {
-    let blockchain: blockchain::Blockchain;
+    let blockchain: Blockchain;
 
     let genesis_block = Block::new(
         0,
         "".to_string(),
         json!({
-            "username": "Nikita"
+            "description": "This is a genesis block"
         }),
         get_current_time(),
     );
