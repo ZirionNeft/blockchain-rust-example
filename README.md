@@ -11,10 +11,10 @@ A some little list of my tasks which I want to bring to live, *step by step*
 - [x] A possible to simple HTTP interaction
 - [x] Proof-Of-Work validation
 - [x] Blockchain storing
-- [] Transactions
-- [] Addresses
-- [] Blockchain network 
-- [] *Something else?...*
+- [ ] Transactions
+- [ ] Addresses
+- [ ] Blockchain network 
+- [ ] *Something else?...*
 
 
 ### Usage
@@ -27,4 +27,4 @@ A some little list of my tasks which I want to bring to live, *step by step*
 | Method | Request | Description |
 | ------ |:-------:| ----------- |
 | **GET** | | Shows all blockchain blocks |
-| **POST** | *body:* { payload: { *any json-valid data here* } } | add block to the blockchain |
+| **POST** | *body:* { payload: { *any json-valid data here* } } | generates new block and adds payload data to the blockchain |
