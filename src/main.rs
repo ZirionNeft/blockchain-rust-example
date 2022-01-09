@@ -2,19 +2,18 @@ use actix_web::web::{Data, Json};
 use actix_web::{error, get, post, App, HttpServer, Result};
 use blockchain::Blockchain;
 use serde::Deserialize;
-use serde_json::{json, Value};
+use serde_json::Value;
 
 use std::io;
 use std::sync::Mutex;
 
+use crate::blockchain::block::Block;
+
 mod blockchain;
 mod utils;
 
-use blockchain::block::Block;
-use utils::get_current_time;
-
-struct AppState {
-    blockchain: Mutex<Blockchain>,
+struct AppState<'a> {
+    blockchain: Mutex<Blockchain<'a>>,
 }
 
 #[derive(Deserialize)]
@@ -23,60 +22,44 @@ struct AddChainBlockQuery {
 }
 
 #[get("/")]
-async fn get_blockchain(data: Data<AppState>) -> Result<Json<Vec<Block>>> {
-    let blocks = data.blockchain.lock().unwrap();
+async fn get_blockchain(data: Data<AppState<'_>>) -> Result<Json<Vec<Block>>> {
+    let blockchain = data.blockchain.lock().unwrap();
 
-    Ok(Json((*blocks).chain.clone()))
+    let mut buffer: Vec<Block> = vec![];
+    for block in blockchain.clone() {
+        buffer.push(block);
+    }
+
+    Ok(Json(buffer))
 }
 
 #[post("/")]
 async fn add_chain_block(
-    data: Data<AppState>,
+    data: Data<AppState<'_>>,
     query_params: Json<AddChainBlockQuery>,
 ) -> Result<Json<Block>> {
     let mut blockchain = data.blockchain.lock().unwrap();
 
-    if blockchain.chain.is_empty() {
-        return Err(error::ErrorInternalServerError(
-            "Blockchain is empty (no genesis block)",
-        ));
+    if blockchain.tip.0.is_empty() {
+        return Err(error::ErrorInternalServerError("Blockchain tip is empty"));
     }
 
-    let new_block: Block = Block::new(
-        blockchain.chain.len() as u32,
-        blockchain.chain[blockchain.chain.len() - 1]
-            .hash
-            .to_string(),
-        json!(&query_params.payload),
-        utils::get_current_time(),
-    );
+    let added_block = match blockchain.add_block(query_params.payload.clone()) {
+        Ok(v) => v,
+        Err(e) => return Err(error::ErrorInternalServerError(e)),
+    };
 
-    if !blockchain::Blockchain::validate_block(
-        &new_block,
-        &blockchain.chain[blockchain.chain.len() - 1],
-    ) {
-        return Err(error::ErrorConflict("Block conflict"));
-    }
-
-    blockchain.chain.push(new_block.clone());
-
-    Ok(Json(new_block))
+    Ok(Json(added_block))
 }
 
 #[actix_web::main]
 async fn main() -> io::Result<()> {
     let blockchain: Blockchain;
 
-    let genesis_block = Block::new(
-        0,
-        "".to_string(),
-        json!({
-            "description": "This is a genesis block"
-        }),
-        get_current_time(),
-    );
-
-    blockchain = blockchain::Blockchain::new(&[genesis_block]);
+    blockchain = match blockchain::Blockchain::new() {
+        Ok(v) => v,
+        Err(e) => panic!("{}", e),
+    };
 
     let app_state = Data::new(AppState {
         blockchain: Mutex::new(blockchain),
