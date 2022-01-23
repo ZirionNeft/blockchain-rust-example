@@ -11,7 +11,8 @@ A some little list of my tasks which I want to bring to live, *step by step*
 - [x] A possible to simple HTTP interaction
 - [x] Proof-Of-Work validation
 - [x] Blockchain storing
-- [ ] Transactions
+- [x] Transactions
+- [ ] Memory pool
 - [ ] Addresses
 - [ ] Blockchain network 
 - [ ] *Something else?...*
@@ -26,5 +27,6 @@ A some little list of my tasks which I want to bring to live, *step by step*
 
 | Method | Request | Description |
 | ------ |:-------:| ----------- |
-| **GET** | | Shows all blockchain blocks |
-| **POST** | *body:* { payload: { *any json-valid data here* } } | generates new block and adds payload data to the blockchain |
+| **GET** | | Shows blockchain history |
+| **POST** | { "address": "*some_name*" } | Creates blockchain if it's not exists |
+| **POST** | { "from": "*sender_name*", "to": "*recipient_name*", "amount": *some_positive_number* } | Send funds to another address |

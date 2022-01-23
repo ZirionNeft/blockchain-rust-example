@@ -1,37 +1,27 @@
 use serde::{Deserialize, Serialize};
-use serde_json::Value as JsonValue;
 use serde_with::serde_as;
+use sha2::{Digest, Sha256};
 
-use super::proof_of_work::ProofOfWork;
+use crate::utils::{get_current_time, HashHex};
 
-type Payload = JsonValue;
-
-#[serde_as]
-#[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct HashHex(#[serde_as(as = "serde_with::hex::Hex")] pub Vec<u8>);
-
-impl From<Vec<u8>> for HashHex {
-    fn from(vec: Vec<u8>) -> Self {
-        HashHex(vec)
-    }
-}
+use super::{proof_of_work::ProofOfWork, transaction::Transaction};
 
 #[serde_as]
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct Block {
     pub timestamp: String,
-    pub payload: Payload,
+    pub transactions: Vec<Transaction>,
     pub hash: HashHex,
     pub prev_hash: HashHex,
     pub nonce: u64,
 }
 
 impl Block {
-    pub fn new(prev_hash: HashHex, payload: JsonValue, timestamp: String) -> Block {
+    pub fn new(prev_hash: HashHex, transactions: Vec<Transaction>) -> Self {
         let mut new_block: Block = Block {
             prev_hash,
-            payload,
-            timestamp,
+            transactions,
+            timestamp: get_current_time(),
             hash: HashHex(vec![]),
             nonce: 0,
         };
@@ -47,6 +37,29 @@ impl Block {
         new_block.nonce = nonce;
 
         new_block
+    }
+
+    pub fn new_genesis(address: String) -> Self {
+        Block::new(
+            HashHex(vec![]),
+            vec![Transaction::new_coinbase(address, None)],
+        )
+    }
+
+    pub fn hash_transactions(&self) -> Vec<u8> {
+        let transactions = &self.transactions;
+
+        let tx_hashes: Vec<u8> = transactions
+            .iter()
+            .map(|tx| tx.id.0.to_owned())
+            .flatten()
+            .collect();
+
+        let mut hasher = Sha256::new();
+
+        hasher.update(tx_hashes);
+
+        hasher.finalize().to_vec()
     }
 }
 

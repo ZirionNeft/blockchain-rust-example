@@ -3,9 +3,7 @@ use std::cmp::Ordering;
 use num_bigint::BigUint;
 use sha2::{Digest, Sha256};
 
-use crate::blockchain::block;
-
-use super::block::HashHex;
+use crate::{blockchain::block, utils::HashHex};
 
 const TARGET_BITS: u16 = 18;
 const MAX_NONCE: u64 = u64::MAX;
@@ -92,9 +90,7 @@ impl<'a> ProofOfWork<'a> {
     fn prepare_data(&self, nonce: u64) -> Vec<u8> {
         let data = [
             &self.block.prev_hash.0,
-            serde_json::to_string(&self.block.payload)
-                .expect("Block payload to string convertion failed")
-                .as_bytes(),
+            &self.block.hash_transactions(),
             self.block.timestamp.as_bytes(),
             TARGET_BITS.to_ne_bytes().as_slice(),
             nonce.to_ne_bytes().as_slice(),
