@@ -26,7 +26,7 @@ A some little list of my tasks which I want to bring to live, *step by step*
 ### API
 
 | Method | Route | Request | Description |
-| ------ |:-------:| ----------- |
+| ------ |:-------:|:-------:| ----------- |
 | **GET** | / | | Show blockchain history |
 | **POST** | / | { "address": "*some_name*" } | Create blockchain if it's not exists |
 | **GET** | /coins/{address} | Show coins balance of address |
