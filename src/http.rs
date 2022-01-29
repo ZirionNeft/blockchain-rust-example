@@ -1,9 +1,9 @@
 use crate::blockchain::block::Block;
 use crate::blockchain::transaction::Transaction;
 use crate::blockchain::Blockchain;
-use actix_web::web::Json;
-use actix_web::{error, get, post, Result};
-use serde::Deserialize;
+use actix_web::web::{Json, Path};
+use actix_web::{error, get, post, Responder, Result};
+use serde::{Deserialize, Serialize};
 
 pub struct AppState {}
 
@@ -12,6 +12,11 @@ pub struct SendBody {
     from: String,
     to: String,
     amount: i32,
+}
+
+#[derive(Serialize)]
+pub struct GetBalanceReponse {
+    balance: u32,
 }
 
 #[derive(Deserialize)]
@@ -50,8 +55,27 @@ pub async fn create_blockchain(body: Json<CreateBlockchainBody>) -> Result<Json<
     Ok(Json(buffer))
 }
 
-// TODO: check the problem with amount of funds (with 3 transactions summary gets 9 coins instead of 10)
-#[post("/send")]
+#[get("/coins/{address}")]
+pub async fn get_balance(path: Path<(String,)>) -> Result<impl Responder> {
+    if !Blockchain::exists() {
+        return Err(error::ErrorNotFound("Blockchain not initialized yet"));
+    }
+
+    let address = path.into_inner().0;
+
+    let blockchain = match Blockchain::new(Some(address.clone())) {
+        Ok(v) => v,
+        Err(e) => panic!("{}", e),
+    };
+
+    let utxo = blockchain.find_utxo(&address);
+
+    let balance = utxo.iter().fold(0, |acc, out| acc + out.value);
+
+    Ok(Json(GetBalanceReponse { balance }))
+}
+
+#[post("/coins")]
 pub async fn add_chain_block(body: Json<SendBody>) -> Result<Json<Block>> {
     let from = body.from.clone();
     let mut blockchain = match Blockchain::new(Some(from)) {

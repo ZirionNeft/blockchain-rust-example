@@ -4,7 +4,11 @@ use kv::{Bucket, Config, Raw, Store};
 
 use crate::utils::HashHex;
 
-use self::{block::Block, proof_of_work::ProofOfWork, transaction::Transaction};
+use self::{
+    block::Block,
+    proof_of_work::ProofOfWork,
+    transaction::{TXOutput, Transaction},
+};
 
 pub(crate) mod block;
 pub(crate) mod proof_of_work;
@@ -179,6 +183,18 @@ impl<'a> Blockchain<'a> {
         }
 
         unspent_transactions
+    }
+
+    pub fn find_utxo(&self, address: &str) -> Vec<TXOutput> {
+        self.find_unspent_transactions(address)
+            .iter()
+            .flat_map(|tx| {
+                tx.outputs
+                    .iter()
+                    .filter(|out| out.is_unlockable_with(address))
+                    .cloned()
+            })
+            .collect()
     }
 
     pub fn find_spendable_outputs(
