@@ -29,5 +29,5 @@ A some little list of my tasks which I want to bring to live, *step by step*
 | ------ |:-------:|:-------:| ----------- |
 | **GET** | / | | Show blockchain history |
 | **POST** | / | { "address": "*some_name*" } | Create blockchain if it's not exists |
-| **GET** | /coins/{address} | Show coins balance of address |
+| **GET** | /coins/{address} | | Show coins balance of address |
 | **POST** | /coins | { "from": "*sender_name*", "to": "*recipient_name*", "amount": *some_positive_number* } | Send coins to another address |
