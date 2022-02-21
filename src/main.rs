@@ -6,7 +6,11 @@ use std::io;
 
 mod blockchain;
 mod http;
+mod store;
 mod utils;
+
+#[macro_use]
+extern crate lazy_static;
 
 #[actix_web::main]
 async fn main() -> io::Result<()> {

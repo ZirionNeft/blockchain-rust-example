@@ -1,5 +1,6 @@
 use crate::blockchain::block::Block;
 use crate::blockchain::transaction::Transaction;
+use crate::blockchain::wallet::Wallet;
 use crate::blockchain::Blockchain;
 use actix_web::web::{Json, Path};
 use actix_web::{error, get, post, Responder, Result};
@@ -68,7 +69,14 @@ pub async fn get_balance(path: Path<(String,)>) -> Result<impl Responder> {
         Err(e) => panic!("{}", e),
     };
 
-    let utxo = blockchain.find_utxo(&address);
+    let wallet = match Wallet::get_by(&address) {
+        Some(v) => v,
+        None => return Err(error::ErrorNotFound("Wallet not found")),
+    };
+
+    let pub_key: Vec<u8> = wallet.pub_key_bytes_vec();
+
+    let utxo = blockchain.find_utxo(&Wallet::hash_pub_key(pub_key));
 
     let balance = utxo.iter().fold(0, |acc, out| acc + out.value);
 

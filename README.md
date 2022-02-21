@@ -12,8 +12,8 @@ A some little list of my tasks which I want to bring to live, *step by step*
 - [x] Proof-Of-Work validation
 - [x] Blockchain storing
 - [x] Transactions
+- [ ] Wallets
 - [ ] Memory pool
-- [ ] Addresses
 - [ ] Blockchain network 
 - [ ] *Something else?...*
 

@@ -3,9 +3,9 @@ use std::fmt;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-use crate::utils::HashHex;
+use crate::utils::{HashHex, Result};
 
-use super::Blockchain;
+use super::{wallet::Wallet, Blockchain};
 
 const REWARD_AMOUNT: u32 = 10;
 
@@ -18,28 +18,41 @@ impl fmt::Display for NotEnoughFundsError {
     }
 }
 
+impl std::error::Error for NotEnoughFundsError {}
+
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct TXOutput {
     pub value: u32,
-    pub script_pub_key: String,
+    pub pub_key_hash: HashHex,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct TXInput {
     pub tx_id: HashHex,
     pub output_index: i32,
-    pub script_signature: String,
+    pub signature: HashHex,
+    pub pub_key: HashHex,
 }
 
 impl TXOutput {
-    pub fn is_unlockable_with(&self, script_pub_key: &str) -> bool {
-        self.script_pub_key == script_pub_key
+    pub fn is_locked_with(&self, pub_key_hash: &HashHex) -> bool {
+        self.pub_key_hash.0 == pub_key_hash.0
+    }
+
+    pub fn lock(&self, address: HashHex) {
+        let mut pub_key_hash = bs58::decode(address.0)
+            .into_vec()
+            .expect("base58 decode to vec error");
+        pub_key_hash = pub_key_hash[1..(&pub_key_hash.len() - 4)].to_vec();
+        self.pub_key_hash = HashHex(pub_key_hash);
     }
 }
 
 impl TXInput {
-    pub fn can_unlock_output_with(&self, script_signature: &str) -> bool {
-        self.script_signature == script_signature
+    pub fn uses_key(&self, pub_key_hash: &HashHex) -> bool {
+        let locking_hash = Wallet::hash_pub_key(self.pub_key.0.clone());
+
+        pub_key_hash.0 == locking_hash.0
     }
 }
 
@@ -69,16 +82,16 @@ impl Transaction {
         }
     }
 
-    pub fn new_utxo(
-        from: String,
-        to: String,
-        amount: u32,
-        bc: &Blockchain,
-    ) -> Result<Transaction, NotEnoughFundsError> {
-        let (acc, spendable_outputs) = bc.find_spendable_outputs(&from, amount);
+    pub fn new_utxo(from: String, to: String, amount: u32, bc: &Blockchain) -> Result<Transaction> {
+        let wallet = Wallet::get_by(&from).expect("Wallet with this address is not found");
+
+        let pub_key = wallet.pub_key_bytes_vec();
+        let pub_key_hash = Wallet::hash_pub_key(pub_key.clone());
+
+        let (acc, spendable_outputs) = bc.find_spendable_outputs(&pub_key_hash, amount);
 
         if acc < amount {
-            return Err(NotEnoughFundsError);
+            return Err(NotEnoughFundsError).map_err(|e| e.into());
         }
 
         let inputs: Vec<TXInput> = spendable_outputs
@@ -87,19 +100,24 @@ impl Transaction {
                 outputs.iter().map(|output_index| TXInput {
                     output_index: *output_index,
                     tx_id: tx_id.to_owned(),
-                    script_signature: from.to_owned(),
+                    signature: HashHex(vec![]), // TODO: signature creating?
+                    pub_key: HashHex(pub_key),
                 })
             })
             .flatten()
             .collect();
 
+        let recipient_pub_key_bytes = bs58::decode(to).into_vec()?;
+        let recipient_pub_key =
+            recipient_pub_key_bytes.as_slice()[1..recipient_pub_key_bytes.len() - 4].to_vec();
+
         let outputs = vec![
             TXOutput {
-                script_pub_key: to,
+                pub_key_hash: Wallet::hash_pub_key(recipient_pub_key),
                 value: amount,
             },
             TXOutput {
-                script_pub_key: from,
+                pub_key_hash,
                 value: acc - amount,
             },
         ];
@@ -113,11 +131,12 @@ impl Transaction {
         let tx_in = TXInput {
             tx_id: HashHex(vec![]),
             output_index: -1,
-            script_signature: signature,
+            pub_key: to,
+            signature: signature, // TODO: signature
         };
         let tx_out = TXOutput {
             value: REWARD_AMOUNT,
-            script_pub_key: to,
+            pub_key_hash: to,
         };
 
         Transaction::new(vec![tx_in], vec![tx_out])

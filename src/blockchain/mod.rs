@@ -1,8 +1,11 @@
-use std::{collections::HashMap, error, fs::File};
+use crate::utils::Result;
+use kv::{Bucket, Raw, Store};
+use std::collections::HashMap;
 
-use kv::{Bucket, Config, Raw, Store};
-
-use crate::utils::HashHex;
+use crate::{
+    store::{init_store, CHAIN_BUCKET},
+    utils::HashHex,
+};
 
 use self::{
     block::Block,
@@ -13,8 +16,7 @@ use self::{
 pub(crate) mod block;
 pub(crate) mod proof_of_work;
 pub(crate) mod transaction;
-
-type Result<T> = std::result::Result<T, Box<dyn error::Error>>;
+pub(crate) mod wallet;
 
 #[derive(Clone)]
 pub struct Blockchain<'a> {
@@ -29,31 +31,17 @@ struct IteratorState<'a> {
     bucket: Option<Bucket<'a, Raw, Raw>>,
 }
 
-const DB_PATH: &str = "./chainstate";
-const BUCKET_NAME: &str = "chainstate";
-
-fn init_store() -> Result<Store> {
-    let cfg: Config;
-    if File::open(DB_PATH).is_ok() {
-        cfg = Config::load(DB_PATH)?;
-    } else {
-        cfg = Config::new(DB_PATH);
-    }
-
-    Store::new(cfg).map_err(|e| e.into())
-}
-
 type Accumulated = u32;
 
 impl<'a> Blockchain<'a> {
     pub fn new(address: Option<String>) -> Result<Blockchain<'a>> {
         let store = init_store()?;
 
-        let bucket_name = &BUCKET_NAME.to_string();
+        let bucket_name = &CHAIN_BUCKET.to_string();
 
         let tip_hash: HashHex;
         if store.buckets().contains(bucket_name) {
-            let bucket = store.bucket::<Raw, Raw>(Some(BUCKET_NAME))?;
+            let bucket = store.bucket::<Raw, Raw>(Some(CHAIN_BUCKET))?;
 
             tip_hash = bucket
                 .get(b"1")?
@@ -61,13 +49,13 @@ impl<'a> Blockchain<'a> {
                 .to_vec()
                 .into();
         } else {
-            let bucket = store.bucket::<Raw, Raw>(Some(BUCKET_NAME))?;
+            let blocks_bucket = store.bucket::<Raw, Raw>(Some(CHAIN_BUCKET))?;
 
             let genesis_block = Block::new_genesis(
                 address.ok_or("Blockchain is not initialized yet and address is undefined")?,
             );
 
-            bucket.transaction(|txn| {
+            blocks_bucket.transaction(|txn| {
                 let raw_block: Raw = genesis_block.clone().into();
 
                 txn.set(genesis_block.hash.0.as_slice(), raw_block)?;
@@ -92,9 +80,9 @@ impl<'a> Blockchain<'a> {
     pub fn exists() -> bool {
         let store = init_store().expect("Store init error");
 
-        if store.buckets().contains(&BUCKET_NAME.to_string()) {
+        if store.buckets().contains(&CHAIN_BUCKET.to_string()) {
             let bucket = store
-                .bucket::<Raw, Raw>(Some(BUCKET_NAME))
+                .bucket::<Raw, Raw>(Some(CHAIN_BUCKET))
                 .expect("Can't get bucket");
 
             if let Ok(Some(_tip)) = bucket.get(b"1") {
@@ -109,7 +97,7 @@ impl<'a> Blockchain<'a> {
         &mut self,
         transactions: Vec<Transaction>,
     ) -> std::result::Result<Block, kv::Error> {
-        let bucket = self.store.bucket::<Raw, Raw>(Some(BUCKET_NAME))?;
+        let bucket = self.store.bucket::<Raw, Raw>(Some(CHAIN_BUCKET))?;
 
         let last_hash: HashHex = bucket
             .get(b"1")?
@@ -133,13 +121,11 @@ impl<'a> Blockchain<'a> {
         Ok(new_block)
     }
 
-    pub fn find_unspent_transactions(&self, address: &str) -> Vec<Transaction> {
+    pub fn find_unspent_transactions(&self, pub_key_hash: &HashHex) -> Vec<Transaction> {
         let mut unspent_transactions = vec![];
         let mut spent_tx_outputs = HashMap::<HashHex, Vec<i32>>::new();
 
         let mut iterator = self.to_owned();
-
-        let address = &address.to_string();
 
         loop {
             let block = iterator
@@ -158,14 +144,14 @@ impl<'a> Blockchain<'a> {
                         }
                     }
 
-                    if output.is_unlockable_with(address) {
+                    if output.is_locked_with(pub_key_hash) {
                         unspent_transactions.push(tx.clone());
                     }
                 }
 
                 if !tx.is_coinbase() {
                     for input in tx.inputs.iter() {
-                        if input.can_unlock_output_with(address) {
+                        if input.uses_key(pub_key_hash) {
                             let input_tx_id = input.tx_id.to_owned();
 
                             spent_tx_outputs
@@ -185,13 +171,13 @@ impl<'a> Blockchain<'a> {
         unspent_transactions
     }
 
-    pub fn find_utxo(&self, address: &str) -> Vec<TXOutput> {
-        self.find_unspent_transactions(address)
+    pub fn find_utxo(&self, pub_key_hash: &HashHex) -> Vec<TXOutput> {
+        self.find_unspent_transactions(pub_key_hash)
             .iter()
             .flat_map(|tx| {
                 tx.outputs
                     .iter()
-                    .filter(|out| out.is_unlockable_with(address))
+                    .filter(|out| out.is_locked_with(pub_key_hash))
                     .cloned()
             })
             .collect()
@@ -199,22 +185,20 @@ impl<'a> Blockchain<'a> {
 
     pub fn find_spendable_outputs(
         &self,
-        address: &str,
+        pub_key_hash: &HashHex,
         amount: u32,
     ) -> (Accumulated, HashMap<HashHex, Vec<i32>>) {
         let mut unspent_outputs = HashMap::<HashHex, Vec<i32>>::new();
 
         let mut accumulated = 0;
 
-        let address = &address.to_string();
-
-        let unspent_transactions = self.find_unspent_transactions(address);
+        let unspent_transactions = self.find_unspent_transactions(pub_key_hash);
 
         'outer: for tx in unspent_transactions {
             let tx_id = tx.id;
 
             for (output_index, output) in tx.outputs.iter().enumerate() {
-                if output.is_unlockable_with(address) && accumulated < amount {
+                if output.is_locked_with(pub_key_hash) && accumulated < amount {
                     accumulated += output.value;
 
                     unspent_outputs
@@ -244,7 +228,7 @@ impl<'a> Iterator for Blockchain<'a> {
             None => {
                 let bucket = self
                     .store
-                    .bucket::<Raw, Raw>(Some(BUCKET_NAME))
+                    .bucket::<Raw, Raw>(Some(CHAIN_BUCKET))
                     .expect("Bucket retrieveing during iterating error");
 
                 state.bucket = Some(bucket);
