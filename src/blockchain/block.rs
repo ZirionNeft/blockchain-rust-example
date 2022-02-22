@@ -40,10 +40,9 @@ impl Block {
     }
 
     pub fn new_genesis(address: String) -> Self {
-        Block::new(
-            HashHex(vec![]),
-            vec![Transaction::new_coinbase(address, None)],
-        )
+        let tx = Transaction::new_coinbase(address, None).expect("New coinbase transaction error");
+
+        Block::new(HashHex(vec![]), vec![tx])
     }
 
     pub fn hash_transactions(&self) -> Vec<u8> {

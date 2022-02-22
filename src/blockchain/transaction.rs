@@ -5,7 +5,10 @@ use sha2::{Digest, Sha256};
 
 use crate::utils::{HashHex, Result};
 
-use super::{wallet::Wallet, Blockchain};
+use super::{
+    wallet::{Wallet, WalletNotFoundError},
+    Blockchain,
+};
 
 const REWARD_AMOUNT: u32 = 10;
 
@@ -39,12 +42,12 @@ impl TXOutput {
         self.pub_key_hash.0 == pub_key_hash.0
     }
 
-    pub fn lock(&self, address: HashHex) {
+    pub fn lock(&mut self, address: HashHex) {
         let mut pub_key_hash = bs58::decode(address.0)
             .into_vec()
             .expect("base58 decode to vec error");
         pub_key_hash = pub_key_hash[1..(&pub_key_hash.len() - 4)].to_vec();
-        self.pub_key_hash = HashHex(pub_key_hash);
+        self.pub_key_hash = pub_key_hash.into();
     }
 }
 
@@ -101,19 +104,17 @@ impl Transaction {
                     output_index: *output_index,
                     tx_id: tx_id.to_owned(),
                     signature: HashHex(vec![]), // TODO: signature creating?
-                    pub_key: HashHex(pub_key),
+                    pub_key: pub_key.clone().into(),
                 })
             })
             .flatten()
             .collect();
 
-        let recipient_pub_key_bytes = bs58::decode(to).into_vec()?;
-        let recipient_pub_key =
-            recipient_pub_key_bytes.as_slice()[1..recipient_pub_key_bytes.len() - 4].to_vec();
+        let recipient_pub_key = Wallet::retrieve_pub_key_hash(&to)?;
 
         let outputs = vec![
             TXOutput {
-                pub_key_hash: Wallet::hash_pub_key(recipient_pub_key),
+                pub_key_hash: recipient_pub_key,
                 value: amount,
             },
             TXOutput {
@@ -125,21 +126,29 @@ impl Transaction {
         Ok(Transaction::new(inputs, outputs))
     }
 
-    pub fn new_coinbase(to: String, signature: Option<String>) -> Self {
-        let signature = signature.unwrap_or(format!("Reward to {}", &to));
+    pub fn new_coinbase(address: String, signature: Option<String>) -> Result<Self> {
+        let wallet = match Wallet::get_by(&address) {
+            Some(v) => v,
+            None => return Err(WalletNotFoundError).map_err(|e| e.into()),
+        };
+
+        let pub_key = wallet.pub_key_bytes_vec();
+        let pub_key_hash = Wallet::hash_pub_key(pub_key.clone());
+
+        let signature = signature.unwrap_or(format!("Reward to {}", &address));
 
         let tx_in = TXInput {
             tx_id: HashHex(vec![]),
             output_index: -1,
-            pub_key: to,
-            signature: signature, // TODO: signature
+            pub_key: HashHex(pub_key),
+            signature: signature.as_bytes().into(),
         };
         let tx_out = TXOutput {
             value: REWARD_AMOUNT,
-            pub_key_hash: to,
+            pub_key_hash,
         };
 
-        Transaction::new(vec![tx_in], vec![tx_out])
+        Ok(Transaction::new(vec![tx_in], vec![tx_out]))
     }
 
     pub fn is_coinbase(&self) -> bool {
