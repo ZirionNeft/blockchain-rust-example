@@ -1,6 +1,9 @@
 use actix_web::web::Data;
 use actix_web::{App, HttpServer};
-use http::{add_chain_block, create_blockchain, get_balance, get_blockchain, AppState};
+use http::{
+    add_chain_block, create_blockchain, get_balance, get_blockchain, get_wallets, new_wallet,
+    AppState,
+};
 
 use std::io;
 
@@ -23,6 +26,8 @@ async fn main() -> io::Result<()> {
             .service(add_chain_block)
             .service(create_blockchain)
             .service(get_balance)
+            .service(new_wallet)
+            .service(get_wallets)
     })
     .bind("127.0.0.1:8080")?
     .run()

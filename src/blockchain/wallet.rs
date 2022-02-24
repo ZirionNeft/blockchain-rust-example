@@ -1,13 +1,12 @@
-use std::{fmt, sync::Mutex};
+use std::fmt;
 
-use kv::Bucket;
 use p256::ecdsa::{SigningKey, VerifyingKey};
 use rand_core::OsRng;
 use ripemd::Ripemd160;
 use sha2::{Digest, Sha256};
 
 use crate::{
-    store::{init_store, WALLETS_BUCKET},
+    store::AppStore,
     utils::{HashHex, Result},
 };
 
@@ -24,18 +23,6 @@ impl fmt::Display for WalletNotFoundError {
 
 impl std::error::Error for WalletNotFoundError {}
 
-lazy_static! {
-    static ref WALLETS: Mutex<Bucket<'static, String, Vec<u8>>> = {
-        let store = init_store().expect("Wallets store init error");
-
-        let mut bucket = store
-            .bucket::<String, Vec<u8>>(Some(WALLETS_BUCKET))
-            .expect("Wallets bucket init error");
-
-        Mutex::new(bucket)
-    };
-}
-
 #[derive(Debug, Clone)]
 pub struct Wallet {
     private_key: SigningKey,
@@ -43,13 +30,26 @@ pub struct Wallet {
 }
 
 impl Wallet {
-    pub fn create() -> Self {
-        let (private_key, public_key) = Self::new_key_pair();
+    pub fn new() -> Self {
+        let private_key = SigningKey::random(&mut OsRng);
+        let public_key = VerifyingKey::from(&private_key);
 
         Wallet {
             private_key,
             public_key,
         }
+    }
+
+    pub fn create() -> Result<HashHex> {
+        let wallet = Wallet::new();
+
+        let address = wallet.generate_address();
+
+        let wallets = AppStore::get_wallets_bucket()?;
+
+        wallets.set(address.to_vec(), wallet.private_key.to_bytes().to_vec())?;
+
+        Ok(address)
     }
 
     pub fn from_bytes(private_key: &[u8], public_key: &[u8]) -> Result<Self> {
@@ -62,7 +62,21 @@ impl Wallet {
         })
     }
 
-    pub fn get_address(&self) -> HashHex {
+    pub fn get_all_addresses() -> Result<Vec<HashHex>> {
+        let wallets = AppStore::get_wallets_bucket()?;
+
+        let addresses: Vec<HashHex> = wallets
+            .iter()
+            .map(|k| {
+                k.expect("Wallets item error")
+                    .key()
+                    .expect("Wallets key error")
+            })
+            .collect();
+        Ok(addresses)
+    }
+
+    pub fn generate_address(&self) -> HashHex {
         let pub_key_bytes = self.pub_key_bytes_vec();
 
         let pub_key_hash = Self::hash_pub_key(pub_key_bytes);
@@ -80,9 +94,9 @@ impl Wallet {
     }
 
     pub fn get_by(address: &str) -> Option<Wallet> {
-        let wallets = WALLETS.lock().expect("Wallets locking error");
+        let wallets = AppStore::get_wallets_bucket().expect("Get wallets bucket error");
 
-        if wallets.len() == 0 {
+        if wallets.is_empty() {
             return None;
         }
 
@@ -127,13 +141,6 @@ impl Wallet {
         let pub_key_hash = bytes.as_slice()[1..bytes.len() - 4].to_vec();
 
         Ok(HashHex(pub_key_hash))
-    }
-
-    fn new_key_pair() -> (SigningKey, VerifyingKey) {
-        let private_key = SigningKey::random(&mut OsRng);
-        let public_key = VerifyingKey::from(&private_key);
-
-        (private_key, public_key)
     }
 
     fn checksum_hash(payload: Vec<u8>) -> Vec<u8> {

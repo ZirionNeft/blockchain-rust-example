@@ -2,6 +2,7 @@ use crate::blockchain::block::Block;
 use crate::blockchain::transaction::Transaction;
 use crate::blockchain::wallet::Wallet;
 use crate::blockchain::Blockchain;
+use crate::utils::HashHex;
 use actix_web::web::{Json, Path};
 use actix_web::{error, get, post, Responder, Result};
 use serde::{Deserialize, Serialize};
@@ -23,6 +24,11 @@ pub struct GetBalanceReponse {
 #[derive(Deserialize)]
 pub struct CreateBlockchainBody {
     address: String,
+}
+
+#[derive(Serialize)]
+pub struct CreateWalletResponse {
+    wallet_address: HashHex,
 }
 
 #[get("/")]
@@ -81,6 +87,20 @@ pub async fn get_balance(path: Path<(String,)>) -> Result<impl Responder> {
     let balance = utxo.iter().fold(0, |acc, out| acc + out.value);
 
     Ok(Json(GetBalanceReponse { balance }))
+}
+
+#[post("/wallet")]
+pub async fn new_wallet() -> Result<Json<CreateWalletResponse>> {
+    let wallet_address = Wallet::create().map_err(error::ErrorInternalServerError)?;
+
+    Ok(Json(CreateWalletResponse { wallet_address }))
+}
+
+#[get("/wallet")]
+pub async fn get_wallets() -> Result<Json<Vec<HashHex>>> {
+    let wallet_address = Wallet::get_all_addresses().map_err(error::ErrorInternalServerError)?;
+
+    Ok(Json(wallet_address))
 }
 
 #[post("/coins")]

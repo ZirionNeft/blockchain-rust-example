@@ -1,11 +1,10 @@
-use crate::utils::Result;
-use kv::{Bucket, Raw, Store};
-use std::collections::HashMap;
-
 use crate::{
-    store::{init_store, CHAIN_BUCKET},
-    utils::HashHex,
+    store::AppStore,
+    store::CHAIN_BUCKET,
+    utils::{HashHex, Result},
 };
+use kv::{Bucket, Raw};
+use std::collections::HashMap;
 
 use self::{
     block::Block,
@@ -21,7 +20,6 @@ pub(crate) mod wallet;
 #[derive(Clone)]
 pub struct Blockchain<'a> {
     pub tip: HashHex,
-    pub store: Store,
     iterator_state: IteratorState<'a>,
 }
 
@@ -35,7 +33,8 @@ type Accumulated = u32;
 
 impl<'a> Blockchain<'a> {
     pub fn new(address: Option<String>) -> Result<Blockchain<'a>> {
-        let store = init_store()?;
+        let store = AppStore::get_store();
+        let store = store.lock().unwrap();
 
         let bucket_name = &CHAIN_BUCKET.to_string();
 
@@ -73,12 +72,12 @@ impl<'a> Blockchain<'a> {
                 current_hash: None,
             },
             tip: tip_hash,
-            store,
         })
     }
 
     pub fn exists() -> bool {
-        let store = init_store().expect("Store init error");
+        let store = AppStore::get_store();
+        let store = store.lock().expect("Get store error");
 
         if store.buckets().contains(&CHAIN_BUCKET.to_string()) {
             let bucket = store
@@ -93,11 +92,9 @@ impl<'a> Blockchain<'a> {
         false
     }
 
-    pub fn add_block(
-        &mut self,
-        transactions: Vec<Transaction>,
-    ) -> std::result::Result<Block, kv::Error> {
-        let bucket = self.store.bucket::<Raw, Raw>(Some(CHAIN_BUCKET))?;
+    pub fn add_block(&mut self, transactions: Vec<Transaction>) -> Result<Block> {
+        // let bucket = self.store.bucket::<Raw, Raw>(Some(CHAIN_BUCKET))?;
+        let bucket = AppStore::get_blocks_bucket()?;
 
         let last_hash: HashHex = bucket
             .get(b"1")?
@@ -226,9 +223,7 @@ impl<'a> Iterator for Blockchain<'a> {
         let bucket = match &state.bucket {
             Some(s) => s,
             None => {
-                let bucket = self
-                    .store
-                    .bucket::<Raw, Raw>(Some(CHAIN_BUCKET))
+                let bucket = AppStore::get_blocks_bucket()
                     .expect("Bucket retrieveing during iterating error");
 
                 state.bucket = Some(bucket);
