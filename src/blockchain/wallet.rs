@@ -1,4 +1,7 @@
-use std::fmt;
+use std::{
+    fmt,
+    sync::{Arc, Mutex},
+};
 
 use p256::ecdsa::{SigningKey, VerifyingKey};
 use rand_core::OsRng;
@@ -40,30 +43,20 @@ impl Wallet {
         }
     }
 
-    pub fn create() -> Result<HashHex> {
+    pub fn create(store: Arc<Mutex<AppStore>>) -> Result<HashHex> {
         let wallet = Wallet::new();
-
         let address = wallet.generate_address();
 
-        let wallets = AppStore::get_wallets_bucket()?;
+        let store = store.lock().unwrap();
+        let wallets = store.get_wallets_bucket()?;
 
-        wallets.set(address.to_vec(), wallet.private_key.to_bytes().to_vec())?;
+        wallets.set(address.0.as_slice(), wallet.private_key.to_bytes().to_vec())?;
 
         Ok(address)
     }
 
-    pub fn from_bytes(private_key: &[u8], public_key: &[u8]) -> Result<Self> {
-        let private_key_instance = SigningKey::from_bytes(private_key)?;
-        let public_key_instance = VerifyingKey::try_from(public_key)?;
-
-        Ok(Wallet {
-            private_key: private_key_instance,
-            public_key: public_key_instance,
-        })
-    }
-
-    pub fn get_all_addresses() -> Result<Vec<HashHex>> {
-        let wallets = AppStore::get_wallets_bucket()?;
+    pub fn get_all_addresses(store: &AppStore) -> Result<Vec<HashHex>> {
+        let wallets = store.get_wallets_bucket()?;
 
         let addresses: Vec<HashHex> = wallets
             .iter()
@@ -93,12 +86,17 @@ impl Wallet {
         HashHex(encoded.into_vec())
     }
 
-    pub fn get_by(address: &str) -> Option<Wallet> {
-        let wallets = AppStore::get_wallets_bucket().expect("Get wallets bucket error");
+    pub fn get_by(address: &str, store: &AppStore) -> Option<Wallet> {
+        let wallets = store.get_wallets_bucket().unwrap();
+
+        println!("Wallets in store: {:#?}", wallets.len());
 
         if wallets.is_empty() {
             return None;
         }
+
+        let address = hex::decode(address).unwrap();
+        let address = address.as_slice();
 
         let private_key = wallets.get(address).ok().flatten();
 
@@ -137,6 +135,8 @@ impl Wallet {
     }
 
     pub fn retrieve_pub_key_hash(address: &str) -> Result<HashHex> {
+        let address = hex::decode(address)?;
+
         let bytes = bs58::decode(address).into_vec()?;
         let pub_key_hash = bytes.as_slice()[1..bytes.len() - 4].to_vec();
 

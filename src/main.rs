@@ -2,22 +2,26 @@ use actix_web::web::Data;
 use actix_web::{App, HttpServer};
 use http::{
     add_chain_block, create_blockchain, get_balance, get_blockchain, get_wallets, new_wallet,
-    AppState,
 };
+use store::AppStore;
 
 use std::io;
+use std::sync::{Arc, Mutex};
 
 mod blockchain;
 mod http;
 mod store;
 mod utils;
 
-#[macro_use]
-extern crate lazy_static;
+pub struct AppState {
+    store: Arc<Mutex<AppStore>>,
+}
 
 #[actix_web::main]
 async fn main() -> io::Result<()> {
-    let app_state = Data::new(AppState {});
+    let app_state = Data::new(AppState {
+        store: AppStore::new(),
+    });
 
     HttpServer::new(move || {
         App::new()

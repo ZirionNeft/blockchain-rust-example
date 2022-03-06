@@ -3,7 +3,10 @@ use std::fmt;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-use crate::utils::{HashHex, Result};
+use crate::{
+    store::AppStore,
+    utils::{HashHex, Result},
+};
 
 use super::{
     wallet::{Wallet, WalletNotFoundError},
@@ -86,7 +89,8 @@ impl Transaction {
     }
 
     pub fn new_utxo(from: String, to: String, amount: u32, bc: &Blockchain) -> Result<Transaction> {
-        let wallet = Wallet::get_by(&from).expect("Wallet with this address is not found");
+        let wallet =
+            Wallet::get_by(&from, bc.store).expect("Wallet with this address is not found");
 
         let pub_key = wallet.pub_key_bytes_vec();
         let pub_key_hash = Wallet::hash_pub_key(pub_key.clone());
@@ -112,6 +116,8 @@ impl Transaction {
 
         let recipient_pub_key = Wallet::retrieve_pub_key_hash(&to)?;
 
+        println!("recipient");
+
         let outputs = vec![
             TXOutput {
                 pub_key_hash: recipient_pub_key,
@@ -126,8 +132,12 @@ impl Transaction {
         Ok(Transaction::new(inputs, outputs))
     }
 
-    pub fn new_coinbase(address: String, signature: Option<String>) -> Result<Self> {
-        let wallet = match Wallet::get_by(&address) {
+    pub fn new_coinbase(
+        address: String,
+        signature: Option<String>,
+        store: &AppStore,
+    ) -> Result<Self> {
+        let wallet = match Wallet::get_by(&address, store) {
             Some(v) => v,
             None => return Err(WalletNotFoundError).map_err(|e| e.into()),
         };

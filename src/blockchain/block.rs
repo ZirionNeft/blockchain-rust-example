@@ -2,7 +2,10 @@ use serde::{Deserialize, Serialize};
 use serde_with::serde_as;
 use sha2::{Digest, Sha256};
 
-use crate::utils::{get_current_time, HashHex};
+use crate::{
+    store::AppStore,
+    utils::{get_current_time, HashHex, Result},
+};
 
 use super::{proof_of_work::ProofOfWork, transaction::Transaction};
 
@@ -39,10 +42,10 @@ impl Block {
         new_block
     }
 
-    pub fn new_genesis(address: String) -> Self {
-        let tx = Transaction::new_coinbase(address, None).expect("New coinbase transaction error");
+    pub fn new_genesis(address: String, store: &AppStore) -> Result<Self> {
+        let tx = Transaction::new_coinbase(address, None, store)?;
 
-        Block::new(HashHex(vec![]), vec![tx])
+        Ok(Block::new(HashHex(vec![]), vec![tx]))
     }
 
     pub fn hash_transactions(&self) -> Vec<u8> {

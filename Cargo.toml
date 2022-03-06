@@ -17,7 +17,7 @@ p256 = { version = "0.10.1", features = ["serde"] }
 rand_core = "0.6.3"
 ripemd = "0.1.0"
 bs58 = "0.4.0"
-lazy_static = "1.4.0"
+hex = "0.4.3"
 
 [[bin]]
 name = "blockchain-rust"

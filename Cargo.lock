@@ -373,8 +373,8 @@ version = "0.1.0"
 dependencies = [
  "actix-web",
  "bs58",
+ "hex",
  "kv",
- "lazy_static",
  "num-bigint",
  "p256",
  "rand_core 0.6.3",

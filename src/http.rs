@@ -1,13 +1,14 @@
+use std::sync::Arc;
+
 use crate::blockchain::block::Block;
 use crate::blockchain::transaction::Transaction;
 use crate::blockchain::wallet::Wallet;
 use crate::blockchain::Blockchain;
 use crate::utils::HashHex;
-use actix_web::web::{Json, Path};
+use crate::AppState;
+use actix_web::web::{Data, Json, Path};
 use actix_web::{error, get, post, Responder, Result};
 use serde::{Deserialize, Serialize};
-
-pub struct AppState {}
 
 #[derive(Deserialize)]
 pub struct SendBody {
@@ -32,12 +33,15 @@ pub struct CreateWalletResponse {
 }
 
 #[get("/")]
-pub async fn get_blockchain() -> Result<Json<Vec<Block>>> {
-    if !Blockchain::exists() {
+pub async fn get_blockchain(state: Data<AppState>) -> Result<Json<Vec<Block>>> {
+    let store = Arc::clone(&state.store);
+    let store = store.lock().unwrap();
+
+    if !Blockchain::exists(&store) {
         return Err(error::ErrorNotFound("Blockchain not initialized yet"));
     }
 
-    let blockchain = match Blockchain::new(None) {
+    let blockchain = match Blockchain::new(None, &store) {
         Ok(v) => v,
         Err(e) => panic!("{}", e),
     };
@@ -48,14 +52,21 @@ pub async fn get_blockchain() -> Result<Json<Vec<Block>>> {
 }
 
 #[post("/")]
-pub async fn create_blockchain(body: Json<CreateBlockchainBody>) -> Result<Json<Vec<Block>>> {
-    if Blockchain::exists() {
+pub async fn create_blockchain(
+    state: Data<AppState>,
+    body: Json<CreateBlockchainBody>,
+) -> Result<Json<Vec<Block>>> {
+    let store = Arc::clone(&state.store);
+    let store = store.lock().unwrap();
+
+    if Blockchain::exists(&store) {
         return Err(error::ErrorConflict("Blockchain already exists"));
     }
 
     let address = body.address.to_owned();
 
-    let blockchain = Blockchain::new(Some(address)).expect("Can't create blockchain");
+    let blockchain =
+        Blockchain::new(Some(address), &store).map_err(error::ErrorInternalServerError)?;
 
     let buffer: Vec<Block> = blockchain.into_iter().collect();
 
@@ -63,19 +74,20 @@ pub async fn create_blockchain(body: Json<CreateBlockchainBody>) -> Result<Json<
 }
 
 #[get("/coins/{address}")]
-pub async fn get_balance(path: Path<(String,)>) -> Result<impl Responder> {
-    if !Blockchain::exists() {
+pub async fn get_balance(state: Data<AppState>, path: Path<(String,)>) -> Result<impl Responder> {
+    let store = Arc::clone(&state.store);
+    let store = store.lock().unwrap();
+
+    if !Blockchain::exists(&store) {
         return Err(error::ErrorNotFound("Blockchain not initialized yet"));
     }
 
     let address = path.into_inner().0;
 
-    let blockchain = match Blockchain::new(Some(address.clone())) {
-        Ok(v) => v,
-        Err(e) => panic!("{}", e),
-    };
+    let blockchain =
+        Blockchain::new(Some(address.clone()), &store).map_err(error::ErrorInternalServerError)?;
 
-    let wallet = match Wallet::get_by(&address) {
+    let wallet = match Wallet::get_by(&address, &store) {
         Some(v) => v,
         None => return Err(error::ErrorNotFound("Wallet not found")),
     };
@@ -90,26 +102,33 @@ pub async fn get_balance(path: Path<(String,)>) -> Result<impl Responder> {
 }
 
 #[post("/wallet")]
-pub async fn new_wallet() -> Result<Json<CreateWalletResponse>> {
-    let wallet_address = Wallet::create().map_err(error::ErrorInternalServerError)?;
+pub async fn new_wallet(state: Data<AppState>) -> Result<Json<CreateWalletResponse>> {
+    let store = Arc::clone(&state.store);
+    let wallet_address = Wallet::create(store).map_err(error::ErrorInternalServerError)?;
 
     Ok(Json(CreateWalletResponse { wallet_address }))
 }
 
 #[get("/wallet")]
-pub async fn get_wallets() -> Result<Json<Vec<HashHex>>> {
-    let wallet_address = Wallet::get_all_addresses().map_err(error::ErrorInternalServerError)?;
+pub async fn get_wallets(state: Data<AppState>) -> Result<Json<Vec<HashHex>>> {
+    let store = Arc::clone(&state.store);
+    let store = store.lock().unwrap();
+
+    let wallet_address =
+        Wallet::get_all_addresses(&store).map_err(error::ErrorInternalServerError)?;
 
     Ok(Json(wallet_address))
 }
 
+// TODO: запрет переводить самому себе на один и тот же кошелек
 #[post("/coins")]
-pub async fn add_chain_block(body: Json<SendBody>) -> Result<Json<Block>> {
+pub async fn add_chain_block(state: Data<AppState>, body: Json<SendBody>) -> Result<Json<Block>> {
+    let store = Arc::clone(&state.store);
+    let store = store.lock().unwrap();
+
     let from = body.from.clone();
-    let mut blockchain = match Blockchain::new(Some(from)) {
-        Ok(v) => v,
-        Err(e) => panic!("{}", e),
-    };
+
+    let mut blockchain = Blockchain::new(Some(from), &store).unwrap(); //.map_err(error::ErrorInternalServerError)?;
 
     if blockchain.tip.0.is_empty() {
         return Err(error::ErrorInternalServerError("Blockchain tip is empty"));
@@ -127,12 +146,11 @@ pub async fn add_chain_block(body: Json<SendBody>) -> Result<Json<Block>> {
         body.amount as u32,
         &blockchain,
     )
-    .map_err(error::ErrorBadRequest)?;
+    .unwrap();
+    //.map_err(error::ErrorInternalServerError)?;
 
-    let added_block = match blockchain.add_block(vec![transaction]) {
-        Ok(v) => v,
-        Err(e) => return Err(error::ErrorInternalServerError(e)),
-    };
+    let added_block = blockchain.add_block(vec![transaction]).unwrap();
+    //.map_err(error::ErrorInternalServerError)?;
 
     Ok(Json(added_block))
 }

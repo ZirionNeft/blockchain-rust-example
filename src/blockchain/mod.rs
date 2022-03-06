@@ -21,6 +21,7 @@ pub(crate) mod wallet;
 pub struct Blockchain<'a> {
     pub tip: HashHex,
     iterator_state: IteratorState<'a>,
+    store: &'a AppStore,
 }
 
 #[derive(Clone)]
@@ -32,15 +33,12 @@ struct IteratorState<'a> {
 type Accumulated = u32;
 
 impl<'a> Blockchain<'a> {
-    pub fn new(address: Option<String>) -> Result<Blockchain<'a>> {
-        let store = AppStore::get_store();
-        let store = store.lock().unwrap();
-
+    pub fn new(address: Option<String>, store: &'a AppStore) -> Result<Blockchain<'a>> {
         let bucket_name = &CHAIN_BUCKET.to_string();
 
         let tip_hash: HashHex;
-        if store.buckets().contains(bucket_name) {
-            let bucket = store.bucket::<Raw, Raw>(Some(CHAIN_BUCKET))?;
+        if store.0.buckets().contains(bucket_name) {
+            let bucket = store.0.bucket::<Raw, Raw>(Some(CHAIN_BUCKET))?;
 
             tip_hash = bucket
                 .get(b"1")?
@@ -48,11 +46,12 @@ impl<'a> Blockchain<'a> {
                 .to_vec()
                 .into();
         } else {
-            let blocks_bucket = store.bucket::<Raw, Raw>(Some(CHAIN_BUCKET))?;
+            let blocks_bucket = store.0.bucket::<Raw, Raw>(Some(CHAIN_BUCKET))?;
 
             let genesis_block = Block::new_genesis(
                 address.ok_or("Blockchain is not initialized yet and address is undefined")?,
-            );
+                store,
+            )?;
 
             blocks_bucket.transaction(|txn| {
                 let raw_block: Raw = genesis_block.clone().into();
@@ -66,23 +65,23 @@ impl<'a> Blockchain<'a> {
             tip_hash = genesis_block.hash;
         }
 
+        println!("Blockchain inited");
+
         Ok(Blockchain {
             iterator_state: IteratorState {
                 bucket: None,
                 current_hash: None,
             },
             tip: tip_hash,
+            store,
         })
     }
 
-    pub fn exists() -> bool {
-        let store = AppStore::get_store();
-        let store = store.lock().expect("Get store error");
+    pub fn exists(store: &AppStore) -> bool {
+        let store = &store.0;
 
         if store.buckets().contains(&CHAIN_BUCKET.to_string()) {
-            let bucket = store
-                .bucket::<Raw, Raw>(Some(CHAIN_BUCKET))
-                .expect("Can't get bucket");
+            let bucket = store.bucket::<Raw, Raw>(Some(CHAIN_BUCKET)).unwrap();
 
             if let Ok(Some(_tip)) = bucket.get(b"1") {
                 return true;
@@ -93,8 +92,7 @@ impl<'a> Blockchain<'a> {
     }
 
     pub fn add_block(&mut self, transactions: Vec<Transaction>) -> Result<Block> {
-        // let bucket = self.store.bucket::<Raw, Raw>(Some(CHAIN_BUCKET))?;
-        let bucket = AppStore::get_blocks_bucket()?;
+        let bucket = self.store.get_blocks_bucket()?;
 
         let last_hash: HashHex = bucket
             .get(b"1")?
@@ -223,7 +221,9 @@ impl<'a> Iterator for Blockchain<'a> {
         let bucket = match &state.bucket {
             Some(s) => s,
             None => {
-                let bucket = AppStore::get_blocks_bucket()
+                let bucket = self
+                    .store
+                    .get_blocks_bucket()
                     .expect("Bucket retrieveing during iterating error");
 
                 state.bucket = Some(bucket);
