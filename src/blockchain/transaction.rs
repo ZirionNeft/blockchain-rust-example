@@ -1,5 +1,12 @@
-use std::fmt;
+use std::{collections::HashMap, fmt, vec};
 
+use p256::{
+    ecdsa::{
+        signature::{Signature, Signer, Verifier},
+        SigningKey, VerifyingKey,
+    },
+    EncodedPoint,
+};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
@@ -71,8 +78,18 @@ pub struct Transaction {
 
 impl Transaction {
     pub fn new(inputs: Vec<TXInput>, outputs: Vec<TXOutput>) -> Self {
-        let vin_raw = serde_json::to_string(&inputs).expect("TXInput deserialize error");
-        let vout_raw = serde_json::to_string(&outputs).expect("TXOutput deserialize error");
+        let id = Self::calculate_hash(&inputs, &outputs).unwrap();
+
+        Transaction {
+            id,
+            inputs,
+            outputs,
+        }
+    }
+
+    pub fn calculate_hash(inputs: &[TXInput], outputs: &[TXOutput]) -> Result<HashHex> {
+        let vin_raw = serde_json::to_string(inputs)?;
+        let vout_raw = serde_json::to_string(outputs)?;
 
         let data = [vin_raw.as_bytes(), vout_raw.as_bytes()].concat();
 
@@ -81,11 +98,7 @@ impl Transaction {
 
         let hash_bytes: [u8; 32] = hasher.finalize().into();
 
-        Transaction {
-            id: HashHex(hash_bytes.to_vec()),
-            inputs,
-            outputs,
-        }
+        Ok(HashHex(hash_bytes.to_vec()))
     }
 
     pub fn new_utxo(from: String, to: String, amount: u32, bc: &Blockchain) -> Result<Transaction> {
@@ -107,7 +120,7 @@ impl Transaction {
                 outputs.iter().map(|output_index| TXInput {
                     output_index: *output_index,
                     tx_id: tx_id.to_owned(),
-                    signature: HashHex(vec![]), // TODO: signature creating?
+                    signature: HashHex(vec![]),
                     pub_key: pub_key.clone().into(),
                 })
             })
@@ -115,8 +128,6 @@ impl Transaction {
             .collect();
 
         let recipient_pub_key = Wallet::retrieve_pub_key_hash(&to)?;
-
-        println!("recipient");
 
         let outputs = vec![
             TXOutput {
@@ -129,7 +140,76 @@ impl Transaction {
             },
         ];
 
-        Ok(Transaction::new(inputs, outputs))
+        let mut tx = Transaction::new(inputs, outputs);
+
+        bc.sign_transaction(&mut tx, &wallet.private_key);
+
+        Ok(tx)
+    }
+
+    pub fn sign(
+        &mut self,
+        prev_transactions: &mut HashMap<HashHex, Transaction>,
+        private_key: &SigningKey,
+    ) {
+        if self.is_coinbase() {
+            println!("[!] Signing skip - ({:?}) is coinbase transaction", self.id);
+            return;
+        }
+
+        let mut new_tx = self.trimmed_copy();
+
+        let new_inputs = new_tx.inputs.clone();
+
+        for (index, input) in new_inputs.iter().enumerate() {
+            let prev_tx = prev_transactions.get(&input.tx_id).unwrap();
+
+            let inputs = &mut new_tx.inputs;
+
+            inputs[index].signature = vec![].into();
+            inputs[index].pub_key = prev_tx.outputs[input.output_index as usize]
+                .pub_key_hash
+                .clone();
+
+            new_tx.id = Self::calculate_hash(inputs, &new_tx.outputs).unwrap();
+
+            // Clearing value to evade side-effects
+            inputs[index].pub_key = vec![].into();
+
+            let signature = private_key.sign(&new_tx.id.0);
+
+            self.inputs[index].signature = signature.to_vec().into();
+        }
+    }
+
+    pub fn verify(&mut self, prev_transactions: &HashMap<HashHex, Transaction>) -> bool {
+        let mut new_tx = self.trimmed_copy();
+
+        for (index, input) in self.inputs.iter().enumerate() {
+            let prev_tx = prev_transactions.get(&input.tx_id).unwrap();
+
+            let inputs = &mut new_tx.inputs;
+
+            inputs[index].signature = vec![].into();
+            inputs[index].pub_key = prev_tx.outputs[input.output_index as usize]
+                .pub_key_hash
+                .clone();
+
+            new_tx.id = Self::calculate_hash(inputs, &new_tx.outputs).unwrap();
+
+            inputs[index].pub_key = vec![].into();
+
+            let encoded_point = EncodedPoint::from_bytes(&input.pub_key.0).unwrap();
+            let verify_key = VerifyingKey::from_encoded_point(&encoded_point).unwrap();
+
+            let signature = p256::ecdsa::Signature::from_bytes(&input.signature.0).unwrap();
+
+            if verify_key.verify(&new_tx.id.0, &signature).is_err() {
+                return false;
+            }
+        }
+
+        true
     }
 
     pub fn new_coinbase(
@@ -165,5 +245,26 @@ impl Transaction {
         self.inputs.len() == 1
             && self.inputs[0].tx_id.0.is_empty()
             && self.inputs[0].output_index == -1
+    }
+
+    fn trimmed_copy(&self) -> Self {
+        let inputs: Vec<TXInput> = self
+            .inputs
+            .iter()
+            .map(|input| TXInput {
+                tx_id: input.tx_id.clone(),
+                output_index: input.output_index,
+                pub_key: vec![].into(),
+                signature: vec![].into(),
+            })
+            .collect();
+
+        let outputs: Vec<TXOutput> = self.outputs.clone();
+
+        Transaction {
+            id: self.id.clone(),
+            inputs,
+            outputs,
+        }
     }
 }

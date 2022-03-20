@@ -120,7 +120,6 @@ pub async fn get_wallets(state: Data<AppState>) -> Result<Json<Vec<HashHex>>> {
     Ok(Json(wallet_address))
 }
 
-// TODO: запрет переводить самому себе на один и тот же кошелек
 #[post("/coins")]
 pub async fn add_chain_block(state: Data<AppState>, body: Json<SendBody>) -> Result<Json<Block>> {
     let store = Arc::clone(&state.store);
@@ -140,17 +139,21 @@ pub async fn add_chain_block(state: Data<AppState>, body: Json<SendBody>) -> Res
         ));
     }
 
+    if body.from == body.to {
+        return Err(error::ErrorBadRequest("You can't send money to yourself"));
+    }
+
     let transaction = Transaction::new_utxo(
         body.from.to_owned(),
         body.to.to_owned(),
         body.amount as u32,
         &blockchain,
     )
-    .unwrap();
-    //.map_err(error::ErrorInternalServerError)?;
+    .map_err(error::ErrorInternalServerError)?;
 
-    let added_block = blockchain.add_block(vec![transaction]).unwrap();
-    //.map_err(error::ErrorInternalServerError)?;
+    let added_block = blockchain
+        .add_block(vec![transaction])
+        .map_err(error::ErrorInternalServerError)?;
 
     Ok(Json(added_block))
 }

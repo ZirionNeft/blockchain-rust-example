@@ -12,8 +12,9 @@ A some little list of my tasks which I want to bring to live, *step by step*
 - [x] Proof-Of-Work validation
 - [x] Blockchain storing
 - [x] Transactions
-- [ ] Wallets
-- [ ] Memory pool
+- [x] Wallets
+- [x] Transactions signing and verifying
+- [ ] Transcations memory pool
 - [ ] Blockchain network 
 - [ ] *Something else?...*
 
@@ -28,6 +29,8 @@ A some little list of my tasks which I want to bring to live, *step by step*
 | Method | Route | Request | Description |
 | ------ |:-------:|:-------:| ----------- |
 | **GET** | / | | Show blockchain history |
-| **POST** | / | { "address": "*some_name*" } | Create blockchain if it's not exists |
+| **POST** | / | { "address": "*wallet_address*" } | Create blockchain if it's not exists |
 | **GET** | /coins/{address} | | Show coins balance of address |
-| **POST** | /coins | { "from": "*sender_name*", "to": "*recipient_name*", "amount": *some_positive_number* } | Send coins to another address |
+| **POST** | /coins | { "from": "*sender_wallet*", "to": "*recipient_wallet*", "amount": *some_positive_number* } | Send coins to another wallet address |
+| **GET** | /wallet | | Show your local wallets |
+| **POST** | /wallet | | Generate new local wallet |

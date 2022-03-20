@@ -4,7 +4,8 @@ use crate::{
     utils::{HashHex, Result},
 };
 use kv::{Bucket, Raw};
-use std::collections::HashMap;
+use p256::ecdsa::SigningKey;
+use std::{collections::HashMap, error, fmt};
 
 use self::{
     block::Block,
@@ -16,6 +17,17 @@ pub(crate) mod block;
 pub(crate) mod proof_of_work;
 pub(crate) mod transaction;
 pub(crate) mod wallet;
+
+#[derive(Debug, Clone)]
+struct BadTransactionError;
+
+impl fmt::Display for BadTransactionError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "Transaction verifying error")
+    }
+}
+
+impl error::Error for BadTransactionError {}
 
 #[derive(Clone)]
 pub struct Blockchain<'a> {
@@ -46,26 +58,42 @@ impl<'a> Blockchain<'a> {
                 .to_vec()
                 .into();
         } else {
-            let blocks_bucket = store.0.bucket::<Raw, Raw>(Some(CHAIN_BUCKET))?;
+            let init_chain = || -> Result<HashHex> {
+                let blocks_bucket = store.0.bucket::<Raw, Raw>(Some(CHAIN_BUCKET))?;
 
-            let genesis_block = Block::new_genesis(
-                address.ok_or("Blockchain is not initialized yet and address is undefined")?,
-                store,
-            )?;
+                let genesis_block = Block::new_genesis(
+                    address.ok_or("Blockchain is not initialized yet and address is undefined")?,
+                    store,
+                )?;
 
-            blocks_bucket.transaction(|txn| {
-                let raw_block: Raw = genesis_block.clone().into();
+                blocks_bucket.transaction(|txn| {
+                    let raw_block: Raw = genesis_block.clone().into();
 
-                txn.set(genesis_block.hash.0.as_slice(), raw_block)?;
-                txn.set(b"1", genesis_block.hash.0.as_slice())?;
+                    txn.set(genesis_block.hash.0.as_slice(), raw_block)?;
+                    txn.set(b"1", genesis_block.hash.0.as_slice())?;
 
-                Ok(())
+                    Ok(())
+                })?;
+
+                Ok(genesis_block.hash)
+            };
+
+            tip_hash = init_chain().map_err(|e| {
+                store
+                    .0
+                    .drop_bucket(bucket_name)
+                    .or_else::<Box<dyn error::Error>, _>(|e| {
+                        println!("{:?}", e);
+                        println!("(*) Bucket did not deleted");
+                        Ok(())
+                    })
+                    .ok();
+
+                e
             })?;
-
-            tip_hash = genesis_block.hash;
         }
 
-        println!("Blockchain inited");
+        println!("-> Blockchain inited!");
 
         Ok(Blockchain {
             iterator_state: IteratorState {
@@ -91,7 +119,7 @@ impl<'a> Blockchain<'a> {
         false
     }
 
-    pub fn add_block(&mut self, transactions: Vec<Transaction>) -> Result<Block> {
+    pub fn add_block(&mut self, mut transactions: Vec<Transaction>) -> Result<Block> {
         let bucket = self.store.get_blocks_bucket()?;
 
         let last_hash: HashHex = bucket
@@ -99,6 +127,13 @@ impl<'a> Blockchain<'a> {
             .expect("Tip block hash value is None")
             .to_vec()
             .into();
+
+        for tx in transactions.iter_mut() {
+            if !self.verify_transaction(tx) {
+                println!("[!] Transactions verification is not passed");
+                return Err(Box::new(BadTransactionError));
+            }
+        }
 
         let new_block: Block = Block::new(last_hash, transactions);
 
@@ -114,6 +149,58 @@ impl<'a> Blockchain<'a> {
         self.tip = new_block.hash.to_owned();
 
         Ok(new_block)
+    }
+
+    pub fn find_transaction(&self, id: &HashHex) -> Option<Transaction> {
+        let mut iterator = self.to_owned();
+
+        loop {
+            let block = iterator.next().unwrap();
+
+            let tx = block
+                .transactions
+                .iter()
+                .find(|&tx| tx.id.0.cmp(&id.0).is_eq());
+
+            match tx {
+                Some(v) => return Some(v.clone()),
+                None => {
+                    if block.prev_hash.0.is_empty() {
+                        break;
+                    }
+                }
+            }
+        }
+
+        None
+    }
+
+    pub fn sign_transaction(&self, tx: &mut Transaction, private_key: &SigningKey) {
+        let mut prev_txs: HashMap<HashHex, Transaction> = tx
+            .inputs
+            .iter()
+            .map(|input| {
+                let prev_tx = self.find_transaction(&input.tx_id).unwrap();
+
+                (prev_tx.id.clone(), prev_tx)
+            })
+            .collect();
+
+        tx.sign(&mut prev_txs, private_key);
+    }
+
+    pub fn verify_transaction(&self, tx: &mut Transaction) -> bool {
+        let prev_txs: HashMap<HashHex, Transaction> = tx
+            .inputs
+            .iter()
+            .map(|input| {
+                let prev_tx = self.find_transaction(&input.tx_id).unwrap();
+
+                (prev_tx.id.clone(), prev_tx)
+            })
+            .collect();
+
+        tx.verify(&prev_txs)
     }
 
     pub fn find_unspent_transactions(&self, pub_key_hash: &HashHex) -> Vec<Transaction> {

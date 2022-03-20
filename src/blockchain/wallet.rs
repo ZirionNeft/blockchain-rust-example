@@ -28,7 +28,7 @@ impl std::error::Error for WalletNotFoundError {}
 
 #[derive(Debug, Clone)]
 pub struct Wallet {
-    private_key: SigningKey,
+    pub private_key: SigningKey,
     pub public_key: VerifyingKey,
 }
 
