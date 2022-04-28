@@ -1,21 +1,18 @@
 use crate::{
     store::AppStore,
-    store::CHAIN_BUCKET,
+    store::BLOCKS_BUCKET,
     utils::{HashHex, Result},
 };
 use kv::{Bucket, Raw};
 use p256::ecdsa::SigningKey;
 use std::{collections::HashMap, error, fmt};
 
-use self::{
-    block::Block,
-    proof_of_work::ProofOfWork,
-    transaction::{TXOutput, Transaction},
-};
+use self::{block::Block, proof_of_work::ProofOfWork, transaction::Transaction};
 
 pub(crate) mod block;
 pub(crate) mod proof_of_work;
 pub(crate) mod transaction;
+pub(crate) mod utxo_set;
 pub(crate) mod wallet;
 
 #[derive(Debug, Clone)]
@@ -39,27 +36,25 @@ pub struct Blockchain<'a> {
 #[derive(Clone)]
 struct IteratorState<'a> {
     current_hash: Option<HashHex>,
-    bucket: Option<Bucket<'a, Raw, Raw>>,
+    bucket: Option<Bucket<'a, Vec<u8>, Raw>>,
 }
-
-type Accumulated = u32;
 
 impl<'a> Blockchain<'a> {
     pub fn new(address: Option<String>, store: &'a AppStore) -> Result<Blockchain<'a>> {
-        let bucket_name = &CHAIN_BUCKET.to_string();
+        let bucket_name = &BLOCKS_BUCKET.to_string();
 
         let tip_hash: HashHex;
         if store.0.buckets().contains(bucket_name) {
-            let bucket = store.0.bucket::<Raw, Raw>(Some(CHAIN_BUCKET))?;
+            let bucket = store.0.bucket::<Raw, Raw>(Some(BLOCKS_BUCKET))?;
 
             tip_hash = bucket
                 .get(b"1")?
-                .expect("Hash value is None")
+                .expect("Tip hash is not found. Try to remove store and re-init blockchain")
                 .to_vec()
                 .into();
         } else {
             let init_chain = || -> Result<HashHex> {
-                let blocks_bucket = store.0.bucket::<Raw, Raw>(Some(CHAIN_BUCKET))?;
+                let blocks_bucket = store.0.bucket::<Raw, Raw>(Some(BLOCKS_BUCKET))?;
 
                 let genesis_block = Block::new_genesis(
                     address.ok_or("Blockchain is not initialized yet and address is undefined")?,
@@ -93,8 +88,6 @@ impl<'a> Blockchain<'a> {
             })?;
         }
 
-        println!("-> Blockchain inited!");
-
         Ok(Blockchain {
             iterator_state: IteratorState {
                 bucket: None,
@@ -108,8 +101,8 @@ impl<'a> Blockchain<'a> {
     pub fn exists(store: &AppStore) -> bool {
         let store = &store.0;
 
-        if store.buckets().contains(&CHAIN_BUCKET.to_string()) {
-            let bucket = store.bucket::<Raw, Raw>(Some(CHAIN_BUCKET)).unwrap();
+        if store.buckets().contains(&BLOCKS_BUCKET.to_string()) {
+            let bucket = store.bucket::<Raw, Raw>(Some(BLOCKS_BUCKET)).unwrap();
 
             if let Ok(Some(_tip)) = bucket.get(b"1") {
                 return true;
@@ -123,7 +116,7 @@ impl<'a> Blockchain<'a> {
         let bucket = self.store.get_blocks_bucket()?;
 
         let last_hash: HashHex = bucket
-            .get(b"1")?
+            .get(b"1".to_vec())?
             .expect("Tip block hash value is None")
             .to_vec()
             .into();
@@ -140,8 +133,8 @@ impl<'a> Blockchain<'a> {
         bucket.transaction(|txn| {
             let raw_block: Raw = new_block.clone().into();
 
-            txn.set(new_block.hash.0.as_slice(), raw_block)?;
-            txn.set(b"1", new_block.hash.0.as_slice())?;
+            txn.set(new_block.hash.0.clone(), raw_block)?;
+            txn.set(b"1".to_vec(), new_block.hash.0.as_slice())?;
 
             Ok(())
         })?;
@@ -190,6 +183,10 @@ impl<'a> Blockchain<'a> {
     }
 
     pub fn verify_transaction(&self, tx: &mut Transaction) -> bool {
+        if tx.is_coinbase() {
+            return true;
+        }
+
         let prev_txs: HashMap<HashHex, Transaction> = tx
             .inputs
             .iter()
@@ -201,101 +198,6 @@ impl<'a> Blockchain<'a> {
             .collect();
 
         tx.verify(&prev_txs)
-    }
-
-    pub fn find_unspent_transactions(&self, pub_key_hash: &HashHex) -> Vec<Transaction> {
-        let mut unspent_transactions = vec![];
-        let mut spent_tx_outputs = HashMap::<HashHex, Vec<i32>>::new();
-
-        let mut iterator = self.to_owned();
-
-        loop {
-            let block = iterator
-                .next()
-                .expect("Can't read the block from blockchain during finding unspent transactions");
-
-            for tx in block.transactions.iter() {
-                let tx_id = tx.id.to_owned();
-
-                'outputs: for (output_index, output) in tx.outputs.iter().enumerate() {
-                    if let Some(spent_output_indexes) = &spent_tx_outputs.get(&tx_id) {
-                        for spent_output_index in spent_output_indexes.iter() {
-                            if *spent_output_index == output_index as i32 {
-                                continue 'outputs;
-                            }
-                        }
-                    }
-
-                    if output.is_locked_with(pub_key_hash) {
-                        unspent_transactions.push(tx.clone());
-                    }
-                }
-
-                if !tx.is_coinbase() {
-                    for input in tx.inputs.iter() {
-                        if input.uses_key(pub_key_hash) {
-                            let input_tx_id = input.tx_id.to_owned();
-
-                            spent_tx_outputs
-                                .entry(input_tx_id)
-                                .or_insert_with(Vec::new)
-                                .push(input.output_index);
-                        }
-                    }
-                }
-            }
-
-            if block.prev_hash.0.is_empty() {
-                break;
-            }
-        }
-
-        unspent_transactions
-    }
-
-    pub fn find_utxo(&self, pub_key_hash: &HashHex) -> Vec<TXOutput> {
-        self.find_unspent_transactions(pub_key_hash)
-            .iter()
-            .flat_map(|tx| {
-                tx.outputs
-                    .iter()
-                    .filter(|out| out.is_locked_with(pub_key_hash))
-                    .cloned()
-            })
-            .collect()
-    }
-
-    pub fn find_spendable_outputs(
-        &self,
-        pub_key_hash: &HashHex,
-        amount: u32,
-    ) -> (Accumulated, HashMap<HashHex, Vec<i32>>) {
-        let mut unspent_outputs = HashMap::<HashHex, Vec<i32>>::new();
-
-        let mut accumulated = 0;
-
-        let unspent_transactions = self.find_unspent_transactions(pub_key_hash);
-
-        'outer: for tx in unspent_transactions {
-            let tx_id = tx.id;
-
-            for (output_index, output) in tx.outputs.iter().enumerate() {
-                if output.is_locked_with(pub_key_hash) && accumulated < amount {
-                    accumulated += output.value;
-
-                    unspent_outputs
-                        .entry(tx_id.to_owned())
-                        .or_insert_with(Vec::new)
-                        .push(output_index as i32);
-
-                    if accumulated >= amount {
-                        break 'outer;
-                    }
-                }
-            }
-        }
-
-        (accumulated, unspent_outputs)
     }
 }
 
@@ -316,7 +218,7 @@ impl<'a> Iterator for Blockchain<'a> {
                 state.bucket = Some(bucket);
 
                 println!(
-                    "[!] Bucket loaded with size: {:?}",
+                    "[!] Iterator: Blocks in store - {:?}",
                     state.bucket.as_ref()?.clone().len() - 1
                 );
 

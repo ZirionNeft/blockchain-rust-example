@@ -28,10 +28,7 @@ impl<'a> ProofOfWork<'a> {
 
         target <<= 256 - TARGET_BITS;
 
-        println!(
-            "PoW creating: \ntarget: {:x}\nTARGET_BITS: {}",
-            target, TARGET_BITS
-        );
+        println!("[!] Proof-of-Work target bits: {}", TARGET_BITS);
 
         ProofOfWork { block, target }
     }
@@ -41,7 +38,7 @@ impl<'a> ProofOfWork<'a> {
         let mut hash: Vec<u8> = vec![];
         let mut nonce = 0_u64;
 
-        println!("Starting to mine the new block...");
+        println!("[!] Starting to mine the new block...");
 
         while nonce < MAX_NONCE {
             let data = self.prepare_data(nonce);
@@ -65,7 +62,7 @@ impl<'a> ProofOfWork<'a> {
             let hash_hex = HashHex(hash);
 
             println!(
-                "Block found: (nonce, hash) = ({}, {})",
+                "[!] Block mined: (nonce, hash) = ({}, {})",
                 nonce,
                 serde_json::to_string(&hash_hex).unwrap()
             );

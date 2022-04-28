@@ -1,17 +1,24 @@
-use crate::utils::Result;
+use crate::{blockchain::transaction::TXOutput, utils::Result};
 use std::{
     fs::File,
-    sync::{Arc, Mutex},
+    sync::{Arc, Mutex}, collections::HashMap,
 };
 
-use kv::{Bucket, Config, Raw, Store};
+use kv::{Bucket, Config, Json, Raw, Store};
 
-pub const DB_PATH: &str = "./state";
+pub const DB_PATH: &str = "./store";
 
-pub const CHAIN_BUCKET: &str = "blockchain";
+pub const BLOCKS_BUCKET: &str = "blocks";
+pub const CHAINSTATE_BUCKET: &str = "chainstate";
 pub const WALLETS_BUCKET: &str = "wallets";
 
 pub struct AppStore(pub Store);
+
+type TxId = Vec<u8>;
+type WalletAddress = Vec<u8>;
+type SecretKey = Vec<u8>;
+type BlockHash = Vec<u8>;
+type BlockJson = Raw;
 
 impl<'a> AppStore {
     pub fn new() -> Arc<Mutex<Self>> {
@@ -27,10 +34,20 @@ impl<'a> AppStore {
         Arc::new(Mutex::new(AppStore(store)))
     }
 
-    pub fn get_blocks_bucket(&self) -> Result<Bucket<'a, Raw, Raw>> {
+    pub fn get_blocks_bucket(&self) -> Result<Bucket<'a, Vec<u8>, Raw>> {
         let store = &self.0;
 
-        let bucket = store.bucket::<Raw, Raw>(Some(CHAIN_BUCKET)).unwrap();
+        let bucket = store.bucket::<BlockHash, BlockJson>(Some(BLOCKS_BUCKET)).unwrap();
+
+        Ok(bucket)
+    }
+
+    pub fn get_chainstate_bucket(&self) -> Result<Bucket<'a, Vec<u8>, Json<HashMap<i32, TXOutput>>>> {
+        let store = &self.0;
+
+        let bucket = store
+            .bucket::<TxId, Json<HashMap<i32, TXOutput>>>(Some(CHAINSTATE_BUCKET))
+            .unwrap();
 
         Ok(bucket)
     }
@@ -39,7 +56,7 @@ impl<'a> AppStore {
         let store = &self.0;
 
         let bucket = store
-            .bucket::<Vec<u8>, Vec<u8>>(Some(WALLETS_BUCKET))
+            .bucket::<WalletAddress, SecretKey>(Some(WALLETS_BUCKET))
             .unwrap();
 
         Ok(bucket)

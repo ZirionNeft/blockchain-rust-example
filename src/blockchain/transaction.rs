@@ -16,6 +16,7 @@ use crate::{
 };
 
 use super::{
+    utxo_set::UTXOSet,
     wallet::{Wallet, WalletNotFoundError},
     Blockchain,
 };
@@ -101,14 +102,22 @@ impl Transaction {
         Ok(HashHex(hash_bytes.to_vec()))
     }
 
-    pub fn new_utxo(from: String, to: String, amount: u32, bc: &Blockchain) -> Result<Transaction> {
+    pub fn new_utxo(
+        from: String,
+        to: String,
+        amount: u32,
+        blockchain: &Blockchain,
+    ) -> Result<Transaction> {
         let wallet =
-            Wallet::get_by(&from, bc.store).expect("Wallet with this address is not found");
+            Wallet::get_by(&from, blockchain.store).expect("Wallet with this address is not found");
 
         let pub_key = wallet.pub_key_bytes_vec();
         let pub_key_hash = Wallet::hash_pub_key(pub_key.clone());
 
-        let (acc, spendable_outputs) = bc.find_spendable_outputs(&pub_key_hash, amount);
+        let utxo_set = UTXOSet { blockchain };
+        let (acc, spendable_outputs) = utxo_set
+            .find_spendable_outputs(&pub_key_hash, amount)
+            .unwrap();
 
         if acc < amount {
             return Err(NotEnoughFundsError).map_err(|e| e.into());
@@ -142,7 +151,7 @@ impl Transaction {
 
         let mut tx = Transaction::new(inputs, outputs);
 
-        bc.sign_transaction(&mut tx, &wallet.private_key);
+        blockchain.sign_transaction(&mut tx, &wallet.private_key);
 
         Ok(tx)
     }

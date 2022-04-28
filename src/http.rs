@@ -2,6 +2,7 @@ use std::sync::Arc;
 
 use crate::blockchain::block::Block;
 use crate::blockchain::transaction::Transaction;
+use crate::blockchain::utxo_set::UTXOSet;
 use crate::blockchain::wallet::Wallet;
 use crate::blockchain::Blockchain;
 use crate::utils::HashHex;
@@ -68,6 +69,13 @@ pub async fn create_blockchain(
     let blockchain =
         Blockchain::new(Some(address), &store).map_err(error::ErrorInternalServerError)?;
 
+    let utxo_set = UTXOSet {
+        blockchain: &blockchain,
+    };
+    utxo_set
+        .reindex()
+        .map_err(error::ErrorInternalServerError)?;
+
     let buffer: Vec<Block> = blockchain.into_iter().collect();
 
     Ok(Json(buffer))
@@ -87,18 +95,69 @@ pub async fn get_balance(state: Data<AppState>, path: Path<(String,)>) -> Result
     let blockchain =
         Blockchain::new(Some(address.clone()), &store).map_err(error::ErrorInternalServerError)?;
 
-    let wallet = match Wallet::get_by(&address, &store) {
-        Some(v) => v,
-        None => return Err(error::ErrorNotFound("Wallet not found")),
+    let pub_key_hash =
+        Wallet::retrieve_pub_key_hash(&address).map_err(error::ErrorInternalServerError)?;
+
+    let utxo_set = UTXOSet {
+        blockchain: &blockchain,
     };
 
-    let pub_key: Vec<u8> = wallet.pub_key_bytes_vec();
-
-    let utxo = blockchain.find_utxo(&Wallet::hash_pub_key(pub_key));
+    let utxo = utxo_set
+        .find_utxo(&pub_key_hash)
+        .map_err(error::ErrorInternalServerError)?;
 
     let balance = utxo.iter().fold(0, |acc, out| acc + out.value);
 
     Ok(Json(GetBalanceReponse { balance }))
+}
+
+#[post("/coins")]
+pub async fn add_chain_block(state: Data<AppState>, body: Json<SendBody>) -> Result<Json<Block>> {
+    let store = Arc::clone(&state.store);
+    let store = store.lock().unwrap();
+
+    let from = body.from.clone();
+
+    let mut blockchain = Blockchain::new(Some(from.to_owned()), &store).unwrap(); //.map_err(error::ErrorInternalServerError)?;
+
+    if blockchain.tip.0.is_empty() {
+        return Err(error::ErrorInternalServerError("Blockchain tip is empty"));
+    }
+
+    if body.amount <= 0 {
+        return Err(error::ErrorBadRequest(
+            "Amount value can't be low or equal than zero",
+        ));
+    }
+
+    if body.from == body.to {
+        return Err(error::ErrorBadRequest("You can't send money to yourself"));
+    }
+
+    let transaction = Transaction::new_utxo(
+        from.to_owned(),
+        body.to.to_owned(),
+        body.amount as u32,
+        &blockchain,
+    )
+    .map_err(error::ErrorInternalServerError)?;
+
+    // Block miner reward
+    let coinbase_tx =
+        Transaction::new_coinbase(from, None, &store).map_err(error::ErrorInternalServerError)?;
+
+    let added_block = blockchain
+        .add_block(vec![coinbase_tx, transaction])
+        .map_err(error::ErrorInternalServerError)?;
+
+    let utxo_set = UTXOSet {
+        blockchain: &blockchain,
+    };
+    utxo_set
+        .update(&added_block)
+        .map_err(error::ErrorInternalServerError)?;
+
+    Ok(Json(added_block))
 }
 
 #[post("/wallet")]
@@ -118,42 +177,4 @@ pub async fn get_wallets(state: Data<AppState>) -> Result<Json<Vec<HashHex>>> {
         Wallet::get_all_addresses(&store).map_err(error::ErrorInternalServerError)?;
 
     Ok(Json(wallet_address))
-}
-
-#[post("/coins")]
-pub async fn add_chain_block(state: Data<AppState>, body: Json<SendBody>) -> Result<Json<Block>> {
-    let store = Arc::clone(&state.store);
-    let store = store.lock().unwrap();
-
-    let from = body.from.clone();
-
-    let mut blockchain = Blockchain::new(Some(from), &store).unwrap(); //.map_err(error::ErrorInternalServerError)?;
-
-    if blockchain.tip.0.is_empty() {
-        return Err(error::ErrorInternalServerError("Blockchain tip is empty"));
-    }
-
-    if body.amount <= 0 {
-        return Err(error::ErrorBadRequest(
-            "Amount value can't be low or equal than zero",
-        ));
-    }
-
-    if body.from == body.to {
-        return Err(error::ErrorBadRequest("You can't send money to yourself"));
-    }
-
-    let transaction = Transaction::new_utxo(
-        body.from.to_owned(),
-        body.to.to_owned(),
-        body.amount as u32,
-        &blockchain,
-    )
-    .map_err(error::ErrorInternalServerError)?;
-
-    let added_block = blockchain
-        .add_block(vec![transaction])
-        .map_err(error::ErrorInternalServerError)?;
-
-    Ok(Json(added_block))
 }

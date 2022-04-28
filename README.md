@@ -16,7 +16,10 @@ A some little list of my tasks which I want to bring to live, *step by step*
 - [x] Transactions signing and verifying
 - [ ] Transcations memory pool
 - [ ] Blockchain network 
-- [ ] *Something else?...*
+
+## Other possible things
+- Atomic swaps
+- Simple Smart contracts engine
 
 
 ### Usage

@@ -138,7 +138,7 @@ impl Wallet {
         let address = hex::decode(address)?;
 
         let bytes = bs58::decode(address).into_vec()?;
-        let pub_key_hash = bytes.as_slice()[1..bytes.len() - 4].to_vec();
+        let pub_key_hash = bytes.as_slice()[2..bytes.len() - 4].to_vec();
 
         Ok(HashHex(pub_key_hash))
     }
