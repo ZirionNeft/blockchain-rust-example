@@ -109,23 +109,12 @@ impl<'a> UTXOSet<'a> {
                 let tx_item = tx_item.unwrap();
                 let outputs: Json<HashMap<i32, TXOutput>> = tx_item.value().unwrap();
 
-                println!(
-                    "{:?} ## {:?}\n\n",
-                    &outputs.0,
-                    &tx_item.key::<HashHex>().unwrap()
-                );
-
                 let tx_filtered_outputs = outputs
                     .0
-                    .iter()
-                    .filter(|(idx, output)| {
-                        println!("is locked: {}", output.is_locked_with(pub_key_hash));
-                        output.is_locked_with(pub_key_hash)
-                    })
+                    .values()
+                    .filter(|output| output.is_locked_with(pub_key_hash))
                     .cloned()
                     .collect::<Vec<TXOutput>>();
-
-                println!("is empty: {:?}", tx_filtered_outputs.is_empty());
 
                 if !tx_filtered_outputs.is_empty() {
                     return Some(tx_filtered_outputs);
@@ -152,9 +141,9 @@ impl<'a> UTXOSet<'a> {
         for item in bucket.iter() {
             let item = item?;
             let tx_id: Vec<u8> = item.key()?;
-            let outputs = item.value::<Json<Vec<TXOutput>>>()?.0;
+            let outputs = item.value::<Json<HashMap<i32, TXOutput>>>()?.0;
 
-            for (output_index, output) in outputs.iter().enumerate() {
+            for (output_index, output) in outputs {
                 if output.is_locked_with(pub_key_hash) && accumulated < amount {
                     accumulated += output.value;
 

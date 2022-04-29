@@ -1,5 +1,4 @@
 use std::{collections::HashMap, fmt, vec};
-
 use p256::{
     ecdsa::{
         signature::{Signature, Signer, Verifier},
@@ -7,6 +6,7 @@ use p256::{
     },
     EncodedPoint,
 };
+use rand::distributions::{Alphanumeric, DistString};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
@@ -125,7 +125,7 @@ impl Transaction {
 
         let inputs: Vec<TXInput> = spendable_outputs
             .iter()
-            .map(|(tx_id, outputs)| {
+            .flat_map(|(tx_id, outputs)| {
                 outputs.iter().map(|output_index| TXInput {
                     output_index: *output_index,
                     tx_id: tx_id.to_owned(),
@@ -133,7 +133,6 @@ impl Transaction {
                     pub_key: pub_key.clone().into(),
                 })
             })
-            .flatten()
             .collect();
 
         let recipient_pub_key = Wallet::retrieve_pub_key_hash(&to)?;
@@ -234,7 +233,7 @@ impl Transaction {
         let pub_key = wallet.pub_key_bytes_vec();
         let pub_key_hash = Wallet::hash_pub_key(pub_key.clone());
 
-        let signature = signature.unwrap_or(format!("Reward to {}", &address));
+        let signature = signature.unwrap_or_else(|| Alphanumeric.sample_string(&mut rand::thread_rng(), 20));
 
         let tx_in = TXInput {
             tx_id: HashHex(vec![]),
