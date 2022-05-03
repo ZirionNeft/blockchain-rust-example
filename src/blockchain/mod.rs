@@ -14,6 +14,7 @@ pub(crate) mod proof_of_work;
 pub(crate) mod transaction;
 pub(crate) mod utxo_set;
 pub(crate) mod wallet;
+pub(crate) mod merkle_tree;
 
 #[derive(Debug, Clone)]
 struct BadTransactionError;
