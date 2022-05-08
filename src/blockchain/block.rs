@@ -1,13 +1,12 @@
 use serde::{Deserialize, Serialize};
 use serde_with::serde_as;
-use sha2::{Digest, Sha256};
 
 use crate::{
     store::AppStore,
     utils::{get_current_time, HashHex, Result},
 };
 
-use super::{proof_of_work::ProofOfWork, transaction::Transaction};
+use super::{proof_of_work::ProofOfWork, transaction::Transaction, merkle_tree::MerkleTree};
 
 #[serde_as]
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -51,17 +50,14 @@ impl Block {
     pub fn hash_transactions(&self) -> Vec<u8> {
         let transactions = &self.transactions;
 
-        let tx_hashes: Vec<u8> = transactions
+        let tx_hashes: Vec<Vec<u8>> = transactions
             .iter()
-            .map(|tx| tx.id.0.to_owned())
-            .flatten()
+            .map(|tx| serde_json::to_vec(tx).unwrap())
             .collect();
 
-        let mut hasher = Sha256::new();
+        let merkle_tree = MerkleTree::new(tx_hashes);
 
-        hasher.update(tx_hashes);
-
-        hasher.finalize().to_vec()
+        merkle_tree.root.data
     }
 }
 

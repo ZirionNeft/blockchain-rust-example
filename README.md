@@ -14,12 +14,11 @@ A some little list of my tasks which I want to bring to live, *step by step*
 - [x] Transactions
 - [x] Wallets
 - [x] Transactions signing and verifying
+- [x] UTXO set
+- [x] Merkle Tree
 - [ ] Transcations memory pool
-- [ ] Blockchain network 
-
-## Other possible things
-- Atomic swaps
-- Simple Smart contracts engine
+- [ ] Nodes network
+- [ ] p2pkh
 
 
 ### Usage
